@@ -48,7 +48,7 @@ def read_data(path:str):
 
 
 
-def agg_lines(self, df:pd.DataFrame, single_cols=['Transaction Code', 'JE Doc Type', 'JE Created By'], agg_cols=['G/L Account']):
+def agg_lines(df:pd.DataFrame, single_cols=['Transaction Code', 'JE Doc Type', 'JE Created By'], agg_cols=['G/L Account']):
     """
     Aggregates Transaction lines by joining on Company Code + JE DOC # + Fiscal Year, 
     recording agg_cols columns as sets and $ amount as net change over the transaction.  
