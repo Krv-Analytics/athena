@@ -103,7 +103,7 @@ class GLedger:
         
         
         # Data members used for fitting
-        self.flow_directions = dict()
+        self.flow_directions = None
         self._projection = None 
 
 
@@ -182,7 +182,7 @@ class GLedger:
     
     def fit(self): 
         """
-        Computes pairwise interactions of G/L Accounts to determine common account flow 
+        Computes unitary and pairwise interactions of G/L Accounts to determine common account flow 
         directions. Set the `flow_directions` dictionary with keys being tuples of G/L Accounts and values 
         being a length 4 array. 
                 (gl1,gl2)  ->   (++, +-, -+, --)
@@ -199,14 +199,40 @@ class GLedger:
 
         # Generating pairwise G/L Account list 
         unique_accounts = sorted(self._t_lines['G/L Account'].unique()) 
+        
+        # Initializing flow_directions dictionary 
+        self.flow_directions = {key:np.zeros(2) for key in unique_accounts}
+        
+        
+        for key in unique_accounts: 
+                transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: key in x)].index
+                  # Get transaction lines from transaction 
+                for transaction_index in transaction_list:
+                    lines = self.get_lines_from_transaction(transaction_index) 
+                    flow = lines[lines['G/L Account'] == key].reset_index().iloc[0]['$']
+                    # Account Receives
+                    if flow > 0: 
+                        self.flow_directions[key][0] = self.flow_directions[key][0] + 1 
+                    # Account Deposits
+                    else: 
+                        self.flow_directions[key][1] = self.flow_directions[key][1] + 1 
+
+
         account_pairs = []
         for i in range(0,len(unique_accounts)):
             for j in range(i+1, len(unique_accounts)): 
                 account_pairs.append((unique_accounts[i], unique_accounts[j]))
          
+
+        # Trackign 2-D Directions Flows 
+        pairs_dict = {key_pair:np.zeros(4) for key_pair in account_pairs}
+        
+
+        # Update Flow Directions Dict
+        self.flow_directions.update(pairs_dict)
+
         # Compute flows for each pair 
         for key_pair in account_pairs: 
-            flow_distribution = np.zeros(4)
             # Get list of transactions containing G/L Account Pair 
             transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: (key_pair[0] in x) & (key_pair[1] in x))].index
             
@@ -221,28 +247,46 @@ class GLedger:
 
                 # Both recieve
                 if flow1 > 0 and flow2 > 0: 
-                    flow_distribution[0] = flow_distribution[0] + 1 
+                    self.flow_directions[key_pair][0] = self.flow_directions[key_pair][0] + 1 
                 
                 # First recieves, second deposits 
                 elif flow1  > 0 and flow2 < 0: 
-                    flow_distribution[1] = flow_distribution[1] + 1
+                    self.flow_directions[key_pair][1] = self.flow_directions[key_pair][1] + 1
                 
                 # First deposits, second recieves
                 elif flow1  < 0 and flow2 > 0: 
-                    flow_distribution[2] = flow_distribution[2] + 1
+                    self.flow_directions[key_pair][2] = self.flow_directions[key_pair][2] + 1
                 
                 # Both desposit 
                 else: 
-                    flow_distribution[3] = flow_distribution[3] + 1
-            
-
-            # Set Flow Direction
-            self.flow_directions[key_pair] = flow_distribution
-
+                    self.flow_directions[key_pair][3] = self.flow_directions[key_pair][3] + 1
+        
+        # Drop Zeros
+        flow_directions_keys = self.flow_directions.copy()
+        for key in flow_directions_keys.keys(): 
+            if(sum(self.flow_directions[key]) == 0):  
+                self.flow_directions.pop(key)
 
     
-    def fit_transform(): 
-        # STUB! 
+    def fit_transform(self, transformation='flow', df=None): 
+        """
+        
+        Parameters
+        ----------
+
+        transformation: str
+                Supported types are 'flow', 'interaction', and 'frequency'
+        """
+        # Run Fitting Function if unfitted
+        if self.flow_directions is None: 
+            self.fit() 
+        
+        # May pass new df after training on t_agg
+        if df is None: 
+            df = self._t_agg
+
+        
+        
         return
 
 
