@@ -201,10 +201,15 @@ class GLedger:
         unique_accounts = sorted(self._t_lines['G/L Account'].unique()) 
         
         # Initializing flow_directions dictionary 
-        self.flow_directions = {key:np.zeros(2) for key in unique_accounts}
+        self.flow_directions = {key:np.zeros(3) for key in unique_accounts}
         
         
         for key in unique_accounts: 
+                
+                # Recieve and Deposit 
+                R = 0 
+                D = 0 
+
                 transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: key in x)].index
                   # Get transaction lines from transaction 
                 for transaction_index in transaction_list:
@@ -212,10 +217,15 @@ class GLedger:
                     flow = lines[lines['G/L Account'] == key].reset_index().iloc[0]['$']
                     # Account Receives
                     if flow > 0: 
-                        self.flow_directions[key][0] = self.flow_directions[key][0] + 1 
+                        R = R + 1 
                     # Account Deposits
                     else: 
-                        self.flow_directions[key][1] = self.flow_directions[key][1] + 1 
+                        D = D + 1 
+                
+                total = R + D  
+                self.flow_directions[key][2] = total 
+                self.flow_directions[key][0] = R/ total 
+                self.flow_directions[key][1] = D/total 
 
 
         account_pairs = []
@@ -223,19 +233,16 @@ class GLedger:
             for j in range(i+1, len(unique_accounts)): 
                 account_pairs.append((unique_accounts[i], unique_accounts[j]))
          
-
-        # Trackign 2-D Directions Flows 
-        pairs_dict = {key_pair:np.zeros(4) for key_pair in account_pairs}
-        
-
-        # Update Flow Directions Dict
-        self.flow_directions.update(pairs_dict)
-
         # Compute flows for each pair 
         for key_pair in account_pairs: 
             # Get list of transactions containing G/L Account Pair 
             transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: (key_pair[0] in x) & (key_pair[1] in x))].index
             
+            # RecieveRecieve, RecieveDeposit, DepositRecieve, DepositDeposit
+            RR = 0 
+            RD = 0 
+            DR = 0 
+            DD = 0 
 
             # Get transaction lines from transaction 
             for transaction_index in transaction_list:
@@ -247,25 +254,29 @@ class GLedger:
 
                 # Both recieve
                 if flow1 > 0 and flow2 > 0: 
-                    self.flow_directions[key_pair][0] = self.flow_directions[key_pair][0] + 1 
+                    RR = RR + 1 
                 
                 # First recieves, second deposits 
                 elif flow1  > 0 and flow2 < 0: 
-                    self.flow_directions[key_pair][1] = self.flow_directions[key_pair][1] + 1
+                    RD = RD + 1
                 
                 # First deposits, second recieves
                 elif flow1  < 0 and flow2 > 0: 
-                    self.flow_directions[key_pair][2] = self.flow_directions[key_pair][2] + 1
+                    DR = DR + 1
                 
                 # Both desposit 
                 else: 
-                    self.flow_directions[key_pair][3] = self.flow_directions[key_pair][3] + 1
-        
-        # Drop Zeros
-        flow_directions_keys = self.flow_directions.copy()
-        for key in flow_directions_keys.keys(): 
-            if(sum(self.flow_directions[key]) == 0):  
-                self.flow_directions.pop(key)
+                    DD = DD + 1
+            
+            total =(RR + RD  + DR + DD)
+            if total > 0:
+                self.flow_directions[key_pair] = np.zeros(5)
+                self.flow_directions[key_pair][4] = total 
+                self.flow_directions[key_pair][0] = RR/total 
+                self.flow_directions[key_pair][1] = RD/total 
+                self.flow_directions[key_pair][2] = DR/total 
+                self.flow_directions[key_pair][3] = DD/total 
+    
 
     
     def fit_transform(self, transformation='flow', df=None): 
@@ -275,20 +286,91 @@ class GLedger:
         ----------
 
         transformation: str
-                Supported types are 'flow', 'interaction', and 'frequency'
+                Supported types are 'flow', 'interaction_flow', 'frequency', and 'interaction_frequency'
+
+        df: pd.DataFrame 
+                Data set to perform transformation on (dafault is None, in which case 
+                transformation for t_agg is returned. )
         """
-        # Run Fitting Function if unfitted
-        if self.flow_directions is None: 
-            self.fit() 
         
+        
+        # Run Fitting Function if unfitted
+        if self.flow_directions is None and transformation != 'frequnecy': 
+            self.fit() 
+
         # May pass new df after training on t_agg
         if df is None: 
             df = self._t_agg
 
-        
-        
-        return
+        assert transformation in ['flow', 'interaction_flow', 'frequency', 'interaction_frequency']
 
+        if transformation == 'flow': 
+            return df.apply(self.flow_1Ddescription,axis=1)
+            
+        
+        
+        if transformation == 'frequency': 
+            gl_counts =  df['G/L Account'].apply(frozenset).value_counts().to_dict()
+            return df['G/L Account'].apply(lambda x: gl_counts[frozenset(x)])
+
+        
+        else: 
+            print('Other transformations are not supported at this time.')
+    
+
+
+
+
+    def flow_1Ddescription(self, row): 
+        """
+        Helper function for determining normalcy of flow directions within a 
+        G/L Set. 
+
+        Parameters
+        ----------
+        row: row of a pandas dataframe 
+        
+        """
+        # Array to be return as a projection
+        line_df = self.get_lines_from_transaction(row.name)
+        account_set = row['G/L Account']
+        
+        
+        # Compute transaction flow from set of G/L Accounts 
+        transaction_score = 0 
+        for account in account_set:
+            account_df = line_df[line_df['G/L Account'] == account].reset_index()
+            if(account_df.iloc[0]['$'] > 0):
+                transaction_score += self.flow_directions[account][0]
+            else: 
+                transaction_score += self.flow_directions[account][1]
+        
+        # Return Normalized score  
+        return transaction_score/len(account_set)
+
+
+
+
+    def flow_2Ddescription(self, gl_set: set, norm='l1'): 
+        """
+        Helper function for determining normalcy of two-way flow interactions. 
+        
+        Parameters
+        ----------
+        gl_set: set 
+            A Set of G/L Accounts. 
+        
+        norm: string 
+            l1 or l_inf 
+        """
+        
+        return 
+
+
+
+
+
+    
 
     ################################################################################################
     #
