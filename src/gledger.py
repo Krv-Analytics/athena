@@ -19,10 +19,16 @@ class GLedger:
 
         flow_directions: dict()
 
-
+        projection: pd.DataFrame 
 
         Member Functions
-        ----------------
+        -----------------
+
+        fit(): 
+
+        fit_transform(): 
+
+
     """
 
     ################################################################################################
@@ -104,7 +110,7 @@ class GLedger:
         
         # Data members used for fitting
         self.flow_directions = None
-        self._projection = None 
+        self.projection = None 
 
 
     
@@ -278,7 +284,6 @@ class GLedger:
                 self.flow_directions[key_pair][3] = DD/total 
     
 
-    
     def fit_transform(self, transformation='flow', df=None): 
         """
         
@@ -302,26 +307,23 @@ class GLedger:
         if df is None: 
             df = self._t_agg
 
-        assert transformation in ['flow', 'interaction_flow', 'frequency', 'interaction_frequency']
+        assert transformation in ['flow', 'interaction_flow', 'frequency', 'interaction_frequency'], "Only 'flow', 'flow_interaction', 'frequency', and 'frequency_interaction' are supported "
 
         if transformation == 'flow': 
-            return df.apply(self.flow_1Ddescription,axis=1)
-            
+            return df.apply(self._flow,axis=1)
         
+        if transformation == 'interaction_flow': 
+            return df.apply(self._interaction_flow, axis=1)
+            
+        if transformation == 'interaction_frequency': 
+            return df.apply(self._interaction_frequency, axis=1)
         
         if transformation == 'frequency': 
             gl_counts =  df['G/L Account'].apply(frozenset).value_counts().to_dict()
             return df['G/L Account'].apply(lambda x: gl_counts[frozenset(x)])
 
-        
-        else: 
-            print('Other transformations are not supported at this time.')
-    
 
-
-
-
-    def flow_1Ddescription(self, row): 
+    def _flow(self, row): 
         """
         Helper function for determining normalcy of flow directions within a 
         G/L Set. 
@@ -351,7 +353,7 @@ class GLedger:
 
 
 
-    def flow_2Ddescription(self, gl_set: set, norm='l1'): 
+    def _flow_interaction(self, row): 
         """
         Helper function for determining normalcy of two-way flow interactions. 
         
@@ -363,14 +365,21 @@ class GLedger:
         norm: string 
             l1 or l_inf 
         """
-        
-        return 
-
-
-
-
-
+        # STUB! 
+        return 0 
     
+
+    def _frequency_interaction(self, row): 
+        """
+        Helper function for determining normalcy of two-way interactions. 
+        
+        Parameters
+        ----------
+        row: pandas dataframe row. 
+        """
+        # STUB! 
+        return 0 
+
 
     ################################################################################################
     #
