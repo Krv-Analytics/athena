@@ -4,6 +4,7 @@ import os
 import pandas as pd 
 import numpy as np 
 import matplotlib.pyplot as plt
+from itertools import combinations
 import utils
 
 class GLedger: 
@@ -234,10 +235,7 @@ class GLedger:
                 self.flow_directions[key][1] = D/total 
 
 
-        account_pairs = []
-        for i in range(0,len(unique_accounts)):
-            for j in range(i+1, len(unique_accounts)): 
-                account_pairs.append((unique_accounts[i], unique_accounts[j]))
+        account_pairs = tuple(combinations(unique_accounts, 2))
          
         # Compute flows for each pair 
         for key_pair in account_pairs: 
@@ -284,101 +282,302 @@ class GLedger:
                 self.flow_directions[key_pair][3] = DD/total 
     
 
-    def fit_transform(self, transformation='flow', df=None): 
+    def fit_transform(self, transformation='flow', norm='l1', df=None): 
         """
         
         Parameters
         ----------
 
         transformation: str
-                Supported types are 'flow', 'interaction_flow', 'frequency', and 'interaction_frequency'
+            Supported types are 'flow', 'interaction_flow', 'set_frequency', 'account_frequency', and 'interaction_frequency'
 
-        df: pd.DataFrame 
-                Data set to perform transformation on (dafault is None, in which case 
-                transformation for t_agg is returned. )
+        norm: str
+            'l1' or 'l_inf' norm when computing expected probability
+
+        t_lines: pd.DataFrame 
+            Transaction line Data set to perform transformation on (dafault is None, in which case 
+            transformation for training set t_line is returned.)
+        
+        t_agg: pd.Datafrmae
+            Aggregated transaction line data set corresponding to t_lines. Computed if not 
+            supplied with t_lines. 
         """
         
         
         # Run Fitting Function if unfitted
-        if self.flow_directions is None and transformation != 'frequnecy': 
+        if self.flow_directions is None: 
             self.fit() 
 
         # May pass new df after training on t_agg
         if df is None: 
             df = self._t_agg
 
-        assert transformation in ['flow', 'interaction_flow', 'frequency', 'interaction_frequency'], "Only 'flow', 'flow_interaction', 'frequency', and 'frequency_interaction' are supported "
+        assert transformation in ['flow', 'interaction_flow', 'set_frequency', 'account_frequency', 'interaction_frequency'], "Only 'flow', 'flow_interaction', 'account_frequency', 'set_frequency' and 'frequency_interaction' are supported "
 
+        if transformation == 'set_frequency': 
+            gl_counts =  df['G/L Account'].apply(frozenset).value_counts().to_dict()
+            return df['G/L Account'].apply(lambda x: gl_counts[frozenset(x)])
+     
         if transformation == 'flow': 
-            return df.apply(self._flow,axis=1)
+            return df.apply(self._flow, axis=1)
         
         if transformation == 'interaction_flow': 
             return df.apply(self._interaction_flow, axis=1)
-            
+        
+        if transformation == 'account_frequency':
+            return df.apply(self._account_frequency, axis=1)            
+        
         if transformation == 'interaction_frequency': 
             return df.apply(self._interaction_frequency, axis=1)
-        
-        if transformation == 'frequency': 
-            gl_counts =  df['G/L Account'].apply(frozenset).value_counts().to_dict()
-            return df['G/L Account'].apply(lambda x: gl_counts[frozenset(x)])
+    
 
-
-    def _flow(self, row): 
+    
+    def _flow(self, row, norm='l1', training=True): 
         """
         Helper function for determining normalcy of flow directions within a 
         G/L Set. 
 
         Parameters
         ----------
-        row: row of a pandas dataframe 
+        row: row of a pandas dataframe
+
+        norm: str
+            Either 'l1' or 'l_inf'
+
+        training: bool 
+            Indicator whether or not working on training set 
         
         """
-        # Array to be return as a projection
+        # TODO: Introduce a Utils function (join on ID) for get_lines_from_transaction to interact
+        # with a test set of agg_lines (change df input option to require transaction set and 
+        # lines set)
+
+        # Transaction lines of current transaction
         line_df = self.get_lines_from_transaction(row.name)
+        
+        # Accounts involved in current transaction
         account_set = row['G/L Account']
         
         
-        # Compute transaction flow from set of G/L Accounts 
-        transaction_score = 0 
-        for account in account_set:
-            account_df = line_df[line_df['G/L Account'] == account].reset_index()
-            if(account_df.iloc[0]['$'] > 0):
-                transaction_score += self.flow_directions[account][0]
-            else: 
-                transaction_score += self.flow_directions[account][1]
-        
-        # Return Normalized score  
-        return transaction_score/len(account_set)
+        # 'l1' norm calculation of transaction flow from account set 
+        if norm == 'l1': 
+            transaction_score = 0 
+            for account in account_set:
+                account_df = line_df[line_df['G/L Account'] == account].reset_index()
+                if(account_df.iloc[0]['$'] > 0):
+                    transaction_score += self.flow_directions[account][0]
+                else: 
+                    transaction_score += self.flow_directions[account][1]
+            
+            # Return Normalized score  
+            return transaction_score/len(account_set)
+
+       
+        # 'L_inf' norm calculation of transaction flow from account set
+        elif norm == 'l_inf': 
+            transaction_score = 0 
+            for account in account_set:
+                account_df = line_df[line_df['G/L Account'] == account].reset_index()
+                if(account_df.iloc[0]['$'] > 0):
+                    transaction_score = min(self.flow_directions[account][0], transaction_score)
+                else: 
+                    transaction_score = min(self.flow_directions[account][1], transaction_score)
+            
+            # Return minimum transaction score  
+            return transaction_score         
 
 
-
-
-    def _flow_interaction(self, row): 
+    def _interaction_flow(self, row, norm='l1', training=True): 
         """
-        Helper function for determining normalcy of two-way flow interactions. 
+        Helper function for determining normalcy of two-way flow interactions. It is 
+        intended to be used in a pandas apply function in `fit_transform`. 
         
         Parameters
         ----------
-        gl_set: set 
-            A Set of G/L Accounts. 
-        
-        norm: string 
-            l1 or l_inf 
+        row: 
+            A row in a pandas df. 
+
+        norm: str
+            Either 'l1' or 'l_inf'
+
+        training: bool 
+            Indicator whether or not working on training set 
         """
-        # STUB! 
-        return 0 
+
+        # Transaction lines of current transaction
+        line_df = self.get_lines_from_transaction(row.name)
+
+        # Account set of current transaction 
+        account_set = row['G/L Account']
+
+        # Account pairs list 
+        account_pairs = tuple(combinations(account_set, 2))
+
+         # If working on test set, check that interaction has been seen before
+        if not training:  
+            for key_pair in account_pairs: 
+                key_pair = tuple(sorted(key_pair))
+                if key_pair not in self.flow_directions.keys(): 
+                    return -1
+
+        #  'l_1' norm calculation of probability of account pair flow from account set
+        if norm == 'l1':
+            transaction_score = 0 
+            for key_pair in account_pairs: 
+                key_pair = tuple(sorted(key_pair))
+                
+                account1_flow = line_df[line_df['G/L Account'] == key_pair[0]].reset_index().iloc[0]['$']
+                account2_flow = line_df[line_df['G/L Account'] == key_pair[1]].reset_index().iloc[0]['$']      
+                
+                # Receive Receive 
+                if(account1_flow > 0 and account2_flow > 0 ):
+                    transaction_score += self.flow_directions[key_pair][0]
+
+                # Receive Deposit 
+                elif(account1_flow > 0 and account2_flow < 0 ):
+                    transaction_score += self.flow_directions[key_pair][1]
+
+                # Deposit Receive 
+                elif(account1_flow < 0 and account2_flow > 0 ):
+                    transaction_score += self.flow_directions[key_pair][2]
+
+                # Deposit Deposit 
+                else:
+                    transaction_score += self.flow_directions[key_pair][3]                 
+            
+            # Return normalized transaction score 
+            return transaction_score/len(account_pairs)
+        
+
+        # 'l_inf' norm calculation of probability of account pair flow from account set
+        elif norm == 'l_inf':
+            transaction_score = np.inf 
+            for key_pair in account_pairs:
+                key_pair = tuple(sorted(key_pair))
+
+                account1_flow = line_df[line_df['G/L Account'] == key_pair[0]].reset_index().iloc[0]['$']
+                account2_flow = line_df[line_df['G/L Account'] == key_pair[1]].reset_index().iloc[0]['$']      
+                
+                # Receive Receive 
+                if(account1_flow > 0 and account2_flow > 0 ):
+                    transaction_score = min(self.flow_directions[key_pair][0], transaction_score) 
+
+                # Receive Deposit 
+                elif(account1_flow > 0 and account2_flow < 0 ):
+                    transaction_score = min(self.flow_directions[key_pair][1], transaction_score) 
+
+                # Deposit Receive 
+                elif(account1_flow < 0 and account2_flow > 0 ):
+                    transaction_score = min(self.flow_directions[key_pair][2], transaction_score) 
+
+                # Deposit Deposit 
+                else:
+                    transaction_score = min(self.flow_directions[key_pair][3], transaction_score)                
+            
+            # Return minimum flow 
+            return transaction_score
+        
+        # 'l_inf' norm calculation of account pair activity from account set
+        elif norm == 'l_inf': 
+            transaction_score = np.inf 
+            for key_pair in account_pairs: 
+                transaction_score = min(transaction_score, self.flow_directions[key_pair][4])
+            
+            # Return minimum activity pair score 
+            return transaction_score
+        
     
 
-    def _frequency_interaction(self, row): 
+    def _account_frequency(self, row, norm='l1', training=True): 
         """
-        Helper function for determining normalcy of two-way interactions. 
+        Helper function for determining normalcy acccount activity. It is 
+        intended to be used in a pandas apply function in `fit_transform`. 
         
         Parameters
         ----------
-        row: pandas dataframe row. 
+        row:
+            A row in a pandas df. 
+        
+        norm: str
+            Either 'l1' or 'l_inf'
+
+        training: bool 
+            Indicator whether or not working on training set     
         """
-        # STUB! 
-        return 0 
+        # Set of accounts involved in current transaction
+        account_set = row['G/L Account']
+
+
+        # If working on test set, check that interaction has been seen before
+        if not training:  
+            for key in account_set: 
+                if key not in self.flow_directions.keys(): 
+                    return -1
+
+        # 'l_1' norm calculation of transaction flow from account set 
+        if norm == 'l1': 
+            transaction_score = 0
+            for account in account_set:
+                transaction_score += self.flow_directions[account][2]
+            
+            # Return Normalized score 
+            return transaction_score/len(account_set)
+            
+
+        # 'l_inf' norm calculation of account activity from account set
+        elif norm == 'l_inf':
+            transaction_score = 0 
+            for account in account_set:
+                    transaction_score = min(self.flow_directions[account][2], transaction_score)
+            
+            return transaction_score 
+        
+
+    def _interaction_frequency(self, row, norm='l1', training=True): 
+        """
+        Helper function for determining pairwise account activity. It is 
+        intended to be used in a pandas apply function in `fit_transform`. 
+        
+        Parameters
+        ----------
+        row:
+            A row in a pandas df. 
+        
+        norm: str
+            Either 'l1' or 'l_inf'   
+
+        training: bool 
+            Indicator whether or not working on training set 
+
+        """
+        account_set = row['G/L Account']
+        account_pairs = tuple(combinations(account_set, 2))
+
+         # If working on test set, check that interaction has been seen before
+        if not training:  
+            for key_pair in account_pairs:
+                key_pair = tuple(sorted(key_pair))
+                if key_pair not in self.flow_directions.keys(): 
+                    return -1
+
+        #  'l_1' norm calculation of account pair activity from account set
+        if norm == 'l1':
+            transaction_score = 0 
+            for key_pair in account_pairs: 
+                key_pair = tuple(sorted(key_pair))         
+                transaction_score += self.flow_directions[key_pair][4] 
+            return transaction_score/len(account_pairs)
+        
+        # 'l_inf' norm calculation of account pair activity from account set
+        elif norm == 'l_inf': 
+            transaction_score = np.inf 
+            for key_pair in account_pairs: 
+                key_pair = tuple(sorted(key_pair))
+                transaction_score = min(transaction_score, self.flow_directions[key_pair][4])
+            
+            # Return minimum activity pair score 
+            return transaction_score
+
 
 
     ################################################################################################
