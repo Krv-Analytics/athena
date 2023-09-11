@@ -108,10 +108,12 @@ class GLedger:
         else:
             assert 1==0, "Unsupported data type passed to t_agg."
         
-        
+        # Data members 
+        self.unique_accounts = sorted(self._t_lines['G/L Account'].unique())
+
         # Data members used for fitting
         self.flow_directions = None
-        self.projection = None 
+        self._projection = None 
 
 
     
@@ -282,7 +284,7 @@ class GLedger:
                 self.flow_directions[key_pair][3] = DD/total 
     
 
-    def fit_transform(self, transformation='flow', norm='l1', df=None): 
+    def fit_transform(self, transformation='flow', norm='l1', t_lines=None, t_agg=None): 
         """
         
         Parameters
@@ -308,10 +310,26 @@ class GLedger:
         if self.flow_directions is None: 
             self.fit() 
 
-        # May pass new df after training on t_agg
-        if df is None: 
+       
+        # training condition 
+        if t_lines is None: 
+            training = True 
             df = self._t_agg
+        
+        # testing  
+        else: 
+            assert type(t_lines) == pd.DataFrame
+ 
+            training = False 
+            # Check if t_agg was also provided 
+            if t_agg is None: 
+                df = utils.agg_lines(t_lines)
+            else: 
+                assert type(t_agg) == pd.DataFrame
+                df = t_agg
 
+
+        # Check supported transformation is selected 
         assert transformation in ['flow', 'interaction_flow', 'set_frequency', 'account_frequency', 'interaction_frequency'], "Only 'flow', 'flow_interaction', 'account_frequency', 'set_frequency' and 'frequency_interaction' are supported "
 
         if transformation == 'set_frequency': 
@@ -319,16 +337,16 @@ class GLedger:
             return df['G/L Account'].apply(lambda x: gl_counts[frozenset(x)])
      
         if transformation == 'flow': 
-            return df.apply(self._flow, axis=1)
+            return df.apply(self._flow, axis=1, args=(norm, training))
         
         if transformation == 'interaction_flow': 
-            return df.apply(self._interaction_flow, axis=1)
+            return df.apply(self._interaction_flow, axis=1, args=(norm, training))
         
         if transformation == 'account_frequency':
-            return df.apply(self._account_frequency, axis=1)            
+            return df.apply(self._account_frequency, axis=1, args=(norm, training))            
         
         if transformation == 'interaction_frequency': 
-            return df.apply(self._interaction_frequency, axis=1)
+            return df.apply(self._interaction_frequency, axis=1, args=(norm, training))
     
 
     
@@ -357,7 +375,12 @@ class GLedger:
         
         # Accounts involved in current transaction
         account_set = row['G/L Account']
-        
+
+        # If working on test set, check that interaction has been seen before
+        if not training:  
+            for key in account_set: 
+                if key not in self.flow_directions.keys(): 
+                    return -1
         
         # 'l1' norm calculation of transaction flow from account set 
         if norm == 'l1': 
@@ -375,7 +398,7 @@ class GLedger:
        
         # 'L_inf' norm calculation of transaction flow from account set
         elif norm == 'l_inf': 
-            transaction_score = 0 
+            transaction_score = np.inf
             for account in account_set:
                 account_df = line_df[line_df['G/L Account'] == account].reset_index()
                 if(account_df.iloc[0]['$'] > 0):
@@ -484,8 +507,7 @@ class GLedger:
                 transaction_score = min(transaction_score, self.flow_directions[key_pair][4])
             
             # Return minimum activity pair score 
-            return transaction_score
-        
+            return transaction_score  
     
 
     def _account_frequency(self, row, norm='l1', training=True): 
@@ -577,7 +599,59 @@ class GLedger:
             
             # Return minimum activity pair score 
             return transaction_score
+        
 
+
+    
+    def get_projection(self, projections=['set_frequency', 'account_frequency', 'flow', 'interaction_flow', 'interaction_frequency'], norm='l1'):
+        """
+        Retrieves projection as computed by `fit_transform` and compiles projections into a dataframe. 
+
+        Parameters
+        ----------
+        projections: list 
+            A sublist of ['set_frequency', 'account_frequency', 'flow', 'interaction_flow', 'interaction_frequency']. Default is entire list. 
+        
+        norm: str, list 
+            str: 'l1' or 'l_inf' 
+            list: a list of equal length as projections containing elements 'l1' or 'l_inf'
+        
+        Returns
+        -------
+        A pandas Dataframe with column names set as the projections list and values from fit_transform. 
+        """
+
+        # Check validity of inputs 
+        for projection in projections: 
+            assert projection in ['set_frequency', 'account_frequency', 'flow', 'interaction_flow', 'interaction_frequency'], 'Unsupported Projection Type'
+        
+        if type(norm) == list: 
+            assert len(norm) == len(projections), 'Incompatible lengths of norm and projection list'
+            for l in norm: 
+                assert l in ['l1', 'l_inf'], 'Unsupported norm.'
+        else: 
+            assert norm in ['l1', 'l_inf'], 'Unsupported norm.'
+            norm = [norm] * len(projections)
+        
+
+        # temporary df to return 
+        df = pd.DataFrame()
+
+        if self._projection is None: 
+            self._projection = dict()
+        
+        for i in range(len(norm)): 
+            # Projection has not been pre-computed
+            if tuple([projections[i], norm[i]]) not in self._projection: 
+                self._projection[tuple([projections[i], norm[i]])] = self.fit_transform(transformation=projections[i], norm=norm[i])
+            
+            # Set df column to projection 
+            df[projections[i]] = self._projection[tuple([projections[i], norm[i]])]
+        
+        return df
+
+        
+        
 
 
     ################################################################################################
@@ -620,6 +694,11 @@ class GLedger:
         plt.show()
 
 
+
+    def probability_histogram(self, projection='flow'): 
+        """
+        
+        """
 
     
     def scatter(self): 
