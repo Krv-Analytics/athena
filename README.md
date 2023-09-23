@@ -1,2 +1,2 @@
 # ATHENA
-Anomalous Transaction Hyperplane Erudite Notification Algorithm 
+Anomalous Transaction High-throughput End-to-End Notification Algorithm

@@ -77,7 +77,7 @@ def agg_lines(df:pd.DataFrame, single_cols=['Transaction Code', 'JE Doc Type', '
     
     # Create Transaction ID column 
     sub_df['ID'] = df['Company Code'].astype(str) + df['JE Doc #'].astype(str) + df['Fiscal Year'].astype(str)
-    
+    sub_df['ID'] = sub_df['ID'].astype(int)
 
     # Track total amount across transaction 
     sub_df['$'] = sub_df['$'].apply(abs_amount)

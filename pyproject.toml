@@ -24,6 +24,7 @@ numba = "^0.57.1"
 
 urllib3 = "1.26.16"
 category-encoders = "^2.6.1"
+torch = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.21.1"
