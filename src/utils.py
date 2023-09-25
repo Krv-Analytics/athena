@@ -2,6 +2,13 @@
 import os 
 import pandas as pd
 import numpy as np
+import yaml 
+
+from azure.storage.blob import (
+BlobServiceClient,
+ContainerClient,
+BlobClient
+)
 
 def read_data(path:str):
         """
@@ -94,6 +101,45 @@ def agg_lines(df:pd.DataFrame, single_cols=['Transaction Code', 'JE Doc Type', '
     
     return  agg
 
+
+def find_lines_from_transaction(index: int, t_agg: pd.DataFrame, t_lines: pd.DataFrame): 
+    """
+    Returns the dataframe subset of t_lines that corresponds to transaction lines of the
+    specified index in t_agg. 
+    """
+    # Pull transaction ID from index
+    id = str(t_agg.iloc[index]['ID'])
+
+    # Breakdown ID into Company Code, JE DOC #, and Fiscal Year 
+    cc = int(id[:4])
+    doc_num = int(id[4:-4])
+    year = int(id[-4:])
+
+    # Return subset of transaction lines corresponding to transaction
+    return t_lines[(t_lines['Company Code'] == cc) 
+                            & (t_lines['JE Doc #'] == doc_num) 
+                            & (t_lines['Fiscal Year'] == year)]
+
+
+def get_transaction_sample(t_agg: pd.DataFrame, t_lines:pd.DataFrame, num_samples=1000): 
+    """
+    Returns an aggregated transaction dataframe sample and corresponding t_lines by randomly sampling from 
+    t_agg and rebuilding a lines dataframe corresponding to the sample. 
+
+    """
+
+    sampled_agg = t_agg.sample(num_samples)
+
+    # Apply the function to each index in 'sampled_data' and store the results in a list
+    subset_list = sampled_agg.index.map(lambda index: find_lines_from_transaction(index, t_agg, t_lines)).tolist()
+
+    # Concatenate all the subsets into a single DataFrame
+    sampled_lines = pd.concat(subset_list, ignore_index=True)
+    sampled_agg.reset_index(drop=True, inplace=True)
+    sampled_lines.reset_index(drop=True, inplace=True)
+    return sampled_agg, sampled_lines
+
+    
 
 def convert_to_float(value):
     try:
