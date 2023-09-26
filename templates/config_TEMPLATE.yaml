@@ -1,0 +1,28 @@
+# Config file 
+
+# Fetching from Azure + creating dataset 
+
+run_name: "<your run name>"           # Unique name for your run 
+
+azure_container: "<company name>"     # Convention is to save company data in its own container
+azure_storage_account: "polarbox"     # All ATHENA data is stored on polarbox 
+data_batch: "<YEAR-YEAR>"             # Datasets are compiled together in batches. Please see docs for 
+                                      # description of azure data batches 
+
+
+subset:
+  Fiscal Year: 2022                   # e.g. Fiscal Year: 2021 will subset the data batch to only include
+                                      # transactions from 2021. Any column from the transaction 
+                                      # line dataframe may be subset by an attribute specified here
+
+
+sample_size: "<sample_size>"          # After subsetting, a samplesize can be specified corresponding the 
+                                      # number of transacion in a sample. Set to 'N/A' for entire set. 
+
+
+# Lens Generation 
+
+contamination: "<contamination>"      # Percent (integer) of transactions from sample that are to be considered 
+                                      # suspects, and sent to THEMA 
+
+
