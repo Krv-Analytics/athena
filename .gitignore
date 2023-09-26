@@ -2,3 +2,7 @@ __pycache__/
 notebooks/
 .venv/
 poetry.lock
+config.yaml
+.env
+data/
+datasets/
