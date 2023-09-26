@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 import yaml 
+import pickle
+import shutil
 
 from azure.storage.blob import (
 BlobServiceClient,
@@ -75,6 +77,10 @@ def agg_lines(df:pd.DataFrame, single_cols=['Transaction Code', 'JE Doc Type', '
 
     agg_cols: list 
         A list of columns to be recorded as a set across transacation lines 
+
+    Returns
+    -------
+    A dataframe of aggregated transactions 
     """
     # Subset DataFrame
     sub_df = df.copy()[single_cols + agg_cols + ['Company Code', 'JE Doc #', 'Fiscal Year', '$']]
@@ -115,13 +121,15 @@ def find_lines_from_transaction(index: int, t_agg: pd.DataFrame, t_lines: pd.Dat
     doc_num = int(id[4:-4])
     year = int(id[-4:])
 
+
+
     # Return subset of transaction lines corresponding to transaction
-    return t_lines[(t_lines['Company Code'] == cc) 
-                            & (t_lines['JE Doc #'] == doc_num) 
-                            & (t_lines['Fiscal Year'] == year)]
+    return t_lines[(t_lines['Company Code'].astype(int) == cc) 
+                            & (t_lines['JE Doc #'].astype(int) == doc_num) 
+                            & (t_lines['Fiscal Year'].astype(int) == year)]
 
 
-def get_transaction_sample(t_agg: pd.DataFrame, t_lines:pd.DataFrame, num_samples=1000): 
+def get_transaction_sample(t_agg: pd.DataFrame, t_lines:pd.DataFrame, num_samples=100): 
     """
     Returns an aggregated transaction dataframe sample and corresponding t_lines by randomly sampling from 
     t_agg and rebuilding a lines dataframe corresponding to the sample. 
@@ -152,3 +160,91 @@ def abs_amount(id):
         return 0
     else:
         return id
+    
+
+
+def get_transaction_subset(indices, t_lines, t_agg): 
+    """
+    Returns the subset of t_agg according to indices and corresponding t_lines dataframe. 
+
+    """
+
+    agg_subset = t_agg.iloc[indices]
+    subset_list = agg_subset.index.map(lambda index: find_lines_from_transaction(index, t_agg, t_lines)).tolist()
+    lines_subset = pd.concat(subset_list, ignore_index=True)
+    agg_subset.reset_index(drop=True, inplace=True)
+    lines_subset.reset_index(drop=True, inplace=True)
+
+    return agg_subset, lines_subset
+
+
+def write_to_thema(thema_path, run_name, agg_subset, lines_subset, lens_dict, config_file): 
+    """
+    Writes aggregated transaction dataframe and transaction line dataframe into 
+    *thema_path*/data/*run_name*/raw/
+    """
+    
+    target_raw_dir = os.path.join(thema_path, 'data', run_name, 'raw')
+    target_clean_dir = os.path.join(thema_path, 'data', run_name, 'clean')
+    target_config_file = os.path.join(thema_path, 'data', run_name, 'config.yaml')
+
+
+    # Check if thema_path exists
+    if not os.path.exists(thema_path):
+        raise Exception(f"The specified path to your THEMA repository does not exist.")
+    
+    # Check if the target directories exist, if not, create them
+    if not os.path.exists(target_raw_dir):
+        os.makedirs(target_raw_dir)
+    if not os.path.exists(target_clean_dir):
+        os.makedirs(target_clean_dir)
+
+    # Define the file paths for the dataframes
+    t_agg_path = os.path.join(target_raw_dir, 't_agg.pkl')
+    t_lines_path = os.path.join(target_raw_dir, 't_lines.pkl')
+
+    lens_path = os.path.join(target_clean_dir, 'lens.pkl')
+
+    # Write the dataframes to the specified paths
+    agg_subset.to_pickle(t_agg_path)
+    lines_subset.to_pickle(t_lines_path)
+
+    # write lens to clean data path 
+    with open(lens_path, 'wb') as f:
+        pickle.dump(lens_dict, f)
+
+    # write config file 
+    shutil.copy(config_file, target_config_file)
+
+
+
+def subset_lines(subset:dict, lines:pd.DataFrame): 
+    
+    """
+    Will loop through the subset dictionary, which has keys that correspond to columns in 
+    lines, and values that the column will be subset to. 
+
+    e.g. subset = {Fiscal Year: 2021} will subset the dataframe but taking all rows 
+    with column field "Fiscal Year" equal to 2021. 
+
+    This function returns both the subset of lines, as well as its corresponding aggregrated 
+    columns dataframe.
+
+    """
+
+
+    subset_lines = lines.copy()  # Create a copy of the original DataFrame to avoid modifying it.
+
+    for column, value in subset.items():
+        # Filter the DataFrame based on the specified column and value.
+        subset_lines = subset_lines[subset_lines[column] == value]
+
+    subset_lines.reset_index(inplace=True, drop=True)
+
+    subset_agg = agg_lines(subset_lines)
+
+    return subset_agg, subset_lines
+
+
+
+

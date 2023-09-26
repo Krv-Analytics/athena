@@ -4,3 +4,5 @@ notebooks/
 poetry.lock
 config.yaml
 .env
+data/
+datasets/

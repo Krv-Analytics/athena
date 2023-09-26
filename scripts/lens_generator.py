@@ -1,32 +1,29 @@
+import os 
 import sys 
 import pandas as pd 
-import pickle 
 import psutil
 import time
 import threading
 from pympler import asizeof
 
-sys.path.append('../src/')
+from dotenv import load_dotenv
+load_dotenv() 
+root = os.getenv('root')
+config_file = os.getenv('config_file')
+thema_path = os.getenv('THEMA')
+
+sys.path.append(root+'/src/')
 from gledger import GLedger
 import utils
+import config_utils
 
+config_data = config_utils.load_config(config_file)
 
-# TODO: Move Hard coded variables into yaml 
-transaction_line_file = '/Users/stuartwayland/Desktop/stx_lines.pkl'
-transaction_agg_file = '/Users/stuartwayland/Desktop/stx_agg.pkl'
-raw_outfile = '/Users/stuartwayland/Repos/krv_mapper/data/STX2022-sub100000-Bottom20/raw/stx_agg.pkl'
-clean_outfile = '/Users/stuartwayland/Repos/krv_mapper/data/STX2022-sub100000-Bottom20/clean/stx_athena.pkl'
-size = -1
+# Setting Lens Configuration Variables 
+contamination = config_data['contamination']
 
-
-
-def load_model(size):
-    lines = pd.read_pickle(transaction_line_file)
-    agg = pd.read_pickle(transaction_agg_file)
-    if size > 0:
-        agg, lines = utils.get_transaction_sample(t_agg=agg, t_lines=lines, num_samples=size)
-
-    return GLedger(t_lines=lines, t_agg=agg)
+transaction_line_file = root + "/" +  config_data["tlines_path"]
+transaction_agg_file = root + "/" + config_data["tagg_path"]
 
 def monitor_memory_usage(stop_event):
     process = psutil.Process()
@@ -64,31 +61,24 @@ if __name__ == "__main__":
 
     try:
         # Instantiate Class 
-        gledger = load_model(size)
+        gledger = GLedger(t_agg=transaction_agg_file, t_lines=transaction_line_file)
 
         agg_time = time.time() - start_time
         fit_start = time.time()
-
+        
         # Run your GLedger's fit method
         gledger.fit()
         # Time to fit 
         fit_time = time.time() - fit_start
 
-
-
         projection_start = time.time()
-        projection_dict = gledger.get_projection(sample_perc=20, sample_norm='l2')
 
-        assert projection_dict['clean_data'] is not None 
+        lens_dict = gledger.get_lens(contamination=contamination, sample_norm='l2')
+        assert lens_dict['clean_data'] is not None 
 
-        # Write projection file 
-        with open(clean_outfile, 'wb') as f:
-            pickle.dump(projection_dict, f)
-
-        # Write t_agg subset 
-        agg_subset = gledger.get_agg_df().iloc[projection_dict['hyperparameters']]
-        agg_subset.reset_index(inplace=True, drop=True)
-        agg_subset.to_pickle(raw_outfile)
+        # Write data to thema 
+        agg_subset, lines_subset = utils.get_transaction_subset(lens_dict['hyperparameters'], t_lines = gledger.get_tlines_df(), t_agg = gledger.get_agg_df())
+        utils.write_to_thema(thema_path, config_data['run_name'], agg_subset, lines_subset, lens_dict, config_file)
 
         # Projection Time 
         projection_time = time.time() - projection_start
@@ -106,10 +96,9 @@ if __name__ == "__main__":
     monitoring_thread.join()
 
    # Runtime Specs 
-
+   
     gledger_mem_breakdown(gledger)
-
-    print(f"\n\nRuntime specs for {size} transactions \n")
+    print(f"\n\nRuntime specs for {len(gledger._t_agg)} transactions \n")
     print(f"Aggregation time: {agg_time}")
     print(f"Fitting time: {fit_time}")
     print(f"Projection time: {projection_time}")

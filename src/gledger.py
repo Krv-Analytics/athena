@@ -198,9 +198,9 @@ class GLedger:
         year = int(id[-4:])
 
         # Return subset of transaction lines corresponding to transaction
-        return self._t_lines[(self._t_lines['Company Code'] == cc) 
-                              & (self._t_lines['JE Doc #'] == doc_num) 
-                              & (self._t_lines['Fiscal Year'] == year)]
+        return self._t_lines[(self._t_lines['Company Code'].astype(int) == cc) 
+                              & (self._t_lines['JE Doc #'].astype(int) == doc_num) 
+                              & (self._t_lines['Fiscal Year'].astype(int) == year)]
     
 
 
@@ -234,17 +234,16 @@ class GLedger:
         # Initializing flow_directions dictionary 
         self.flow_directions = {key:np.zeros(3) for key in unique_accounts}
         
-        
         for key in unique_accounts: 
-                
                 # Recieve and Deposit 
                 R = 0 
                 D = 0 
-
-                transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: key in x)].index
-                  # Get transaction lines from transaction 
+                transaction_list = self._t_agg[self._t_agg['G/L Account'].apply(lambda x: key in x)].index 
+                
+            
+                # Get transaction lines from transaction 
                 for transaction_index in transaction_list:
-                    lines = self.get_lines_from_transaction(transaction_index) 
+                    lines = self.get_lines_from_transaction(transaction_index)
                     flow = lines[lines['G/L Account'] == key].reset_index().iloc[0]['$']
                     # Account Receives
                     if flow > 0: 
@@ -632,7 +631,7 @@ class GLedger:
 
 
     
-    def get_projection(self, projections=['set_frequency', 'account_frequency', 'flow', 'interaction_flow', 'interaction_frequency'], norm='l1', sample_perc=100, sample_norm='l1'):
+    def get_lens(self, projections=['set_frequency', 'account_frequency', 'flow', 'interaction_flow', 'interaction_frequency'], norm='l1', contamination=100, sample_norm='l1'):
         """
         Retrieves projection as computed by `fit_transform` and compiles projections into a dataframe. 
 
@@ -645,8 +644,8 @@ class GLedger:
             str: 'l1' or 'l_inf' 
             list: a list of equal length as projections containing elements 'l1' or 'l_inf'
 
-        sample_perc: int
-            Sample size of dataframe to return, which is selected as lowest scoring sample_perc percent of data. 
+        contamination: int
+            Sample size of dataframe to return, which is selected as lowest scoring contamination percent of data. 
 
         sample_norm: str 
             Default is 'l1', which is used for determining lowest score of samples.  
@@ -690,17 +689,17 @@ class GLedger:
         projection_scaler = StandardScaler() 
 
         # Return entire projection
-        if sample_perc == 100: 
+        if contamination == 100: 
             projection_scaler.fit(df)
             return pd.DataFrame(projection_scaler.transform(df), df.columns) 
            
         
-        # Check sample_perc is within the valid range (0.0 to 100.0)
-        if sample_perc < 0.0 or sample_perc > 100.0:
+        # Check contamination is within the valid range (0.0 to 100.0)
+        if contamination < 0.0 or contamination > 100.0:
             raise ValueError("Percentage x must be between 0.0 and 100.0")
 
         # Calculate the number of rows to select
-        num_rows_to_select = int(len(df) * (sample_perc / 100.0))
+        num_rows_to_select = int(len(df) * (contamination / 100.0))
 
         # Calculate norms for each row
         if sample_norm == 'l1':
