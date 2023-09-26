@@ -46,7 +46,7 @@ if __name__ == "__main__":
         if os.path.isfile(config_path):
             print(COLOR_YELLOW + f"Warning: config.yaml already exists. It will not be overwritten." + COLOR_RESET)
         else:  
-            shutil.copy(root + '/templates/config.yaml', root + '/config.yaml')
+            shutil.copy(root + '/templates/config_TEMPLATE.yaml', root + '/config.yaml')
             print(f"Configuration file  has been successfully generated.")
 
         print(COLOR_GREEN + "Successfully installed Athena" + COLOR_RESET)
