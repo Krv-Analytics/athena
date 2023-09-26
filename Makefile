@@ -1,7 +1,7 @@
-.PHONY: install all lens 
+.PHONY: install all lens fetch
 
-all: 
-	@echo "Nothing to make"
+all: fetch lens
+	@echo "Fetching your data set and running lens generator"
 
 install:
 	poetry run python3 ./scripts/setup.py
